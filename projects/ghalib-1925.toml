@@ -1,0 +1,23 @@
+[project]
+name = "Kulliyat-e Ghalib, Newal Kishore Press, 1925"
+
+[pages]
+images = ["../data/kulliyatghalib-1925/pages/34[0-9].jpg"]
+transcriptions = ["../data/kulliyatghalib-1925/pages/34[0-9].txt"]
+
+[reference.ganjoor]
+categories = [2572]
+
+[ocr]
+workers = 4
+model = "gemini-3.8-flash"
+thinking = "low"
+mode = "verse"
+suffix = ""
+
+[alignment]
+output = "../data/kulliyatghalib-1925/ghazal-pilot-pairs.jsonl"
+min_jaccard = 0.55
+min_lines = 4
+min_monotone = 0.80
+review_lines = 2

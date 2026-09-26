@@ -1,0 +1,19 @@
+[project]
+name = "khusrau"
+version = "0.1.0"
+description = "Align historical Urdu and Persian printed texts with digital references"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = [
+    "cryptography>=43.0.0",
+    "PyJWT>=2.8.0",
+    "rapidfuzz>=3.10.0",
+]
+
+[project.optional-dependencies]
+browser = [
+    "playwright>=1.48.0",
+]
+
+[tool.uv]
+package = false

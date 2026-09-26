@@ -1,0 +1,27 @@
+[project]
+name = "Ghalib lithograph alignment"
+
+[pages]
+images = ["pages/*.jpg"]
+transcriptions = ["pages/*.txt"]
+
+[reference.ganjoor]
+categories = [2572]
+
+[reference.rekhta]
+poet = "mirza-ghalib"
+directory = "references/rekhta-ghalib"
+
+[ocr]
+workers = 6
+model = "gemini-3.8-flash"
+thinking = "low"
+mode = "verse"
+suffix = ""
+
+[alignment]
+output = "work/ghalib-pairs.jsonl"
+min_jaccard = 0.55
+min_lines = 4
+min_monotone = 0.80
+review_lines = 2

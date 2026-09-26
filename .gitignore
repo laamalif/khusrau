@@ -1,0 +1,9 @@
+.secrets/
+service_account.json
+*.pyc
+__pycache__/
+cache/
+work/
+data/
+*.log
+.env

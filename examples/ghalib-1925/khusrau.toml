@@ -1,0 +1,16 @@
+[project]
+name = "Kulliyat-e Ghalib sample, Newal Kishore Press, 1925"
+
+[pages]
+images = ["pages/*.jpg"]
+transcriptions = ["pages/*.txt"]
+
+[reference.ganjoor]
+categories = [2572]
+
+[alignment]
+output = "alignments.jsonl"
+min_jaccard = 0.55
+min_lines = 4
+min_monotone = 0.80
+review_lines = 2
