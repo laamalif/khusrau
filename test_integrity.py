@@ -13,6 +13,7 @@ import manufacture
 import ocr_batch
 import ocr_page
 import dataset_export
+from discover_sequence import discover
 from dictionary_extract import validate_entries
 from dictionary_local import (
     classify_boundary,
@@ -26,6 +27,53 @@ from rekhta_prose import story_from_html
 
 
 class IntegrityTests(unittest.TestCase):
+    def test_sequence_discovery_requires_two_exact_offset_anchors(self):
+        class FakeIndex:
+            poems = {1: {"title": "Test", "verses": [
+                "", "", "", "", "", "", "", "", "", "",
+                "reference one", "reference two", "reference three",
+            ]}}
+            hot = set()
+
+            @staticmethod
+            def trigrams(text):
+                return {text[index:index + 3] for index in range(len(text) - 2)}
+
+            def match_line(self, text, min_jaccard=0.30):
+                return {
+                    "anchor one": (1, 10, 0.9, "reference one"),
+                    "recover me": (1, 11, 0.4, "reference two"),
+                    "anchor two": (1, 12, 0.9, "reference three"),
+                }[text]
+
+        record = {
+            "page": "page.txt",
+            "poem_id": 1,
+            "poem_title": "Test",
+            "tier": "gold",
+            "pairs": [
+                {"line": 0, "verse": 10, "jaccard": 0.9,
+                 "hyp": "anchor one", "ref": "reference one"},
+                {"line": 2, "verse": 12, "jaccard": 0.9,
+                 "hyp": "anchor two", "ref": "reference three"},
+            ],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            page = os.path.join(directory, "page.txt")
+            with open(page, "w", encoding="utf-8") as f:
+                f.write("anchor one\nrecover me\nanchor two\n")
+            with patch("discover_sequence.process", return_value=([record], 3)), \
+                    patch("discover_sequence._candidate_score",
+                          return_value=(0.4, "reference two")):
+                rows = discover(FakeIndex(), page)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["candidate"]["verse"], 11)
+        self.assertEqual(rows[0]["evidence"]["offset"], 10)
+        self.assertTrue(rows[0]["candidate"]["is_global_top"])
+        self.assertEqual(
+            rows[0]["evidence"]["exclusion"], "below_acceptance_threshold")
+        self.assertIsNone(rows[0]["adjudication"])
+
     def test_alignment_span_metrics_penalize_internal_omissions(self):
         hits = [
             {"line": 2, "verse": 10},
