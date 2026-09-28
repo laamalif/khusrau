@@ -121,6 +121,28 @@ uv run python khusrau.py reference rekhta-verify \
   references/rekhta-ghalib
 ```
 
+### Sequence discovery
+
+Inspect lines omitted by the normal similarity threshold when two accepted
+matches support the same exact sequence offset:
+
+```bash
+uv run python discover_sequence.py \
+  2572 pages/340.txt pages/341.txt pages/342.txt \
+  -o work/sequence-discovery.jsonl
+```
+
+This local, deterministic research command does not alter alignment tiers,
+promote candidates, or change export eligibility. It writes image-backed JSONL
+evidence for human review, including the historical reading, expected reference
+line, similarity score, surrounding anchors, source hashes, and whether the
+expected reference was also the global top candidate.
+
+Only run discovery against material covered by the selected reference
+categories. For example, Ganjoor category `2572` covers Ghalib's ghazals; an
+unmatched qasida, qit'a, masnavi, or other section is outside that experiment
+and must not be interpreted as an alignment failure.
+
 ### Optional paid OCR
 
 Gemini OCR is disabled unless model access is explicitly enabled:
