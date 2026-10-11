@@ -166,7 +166,10 @@ untouched, so a failed rerun cannot lose a paid or reviewed reading.
 
 `status` reports each page as `complete` (the text matches its STOP response),
 `edited` (the text differs from its response), `unrecorded` (text with no
-response), or as an unfinished `partial`, `failed`, or `pending`.
+response), or as an unfinished `partial`, `failed`, `corrupt`, or `pending`.
+`corrupt` means a response or attempt record cannot be read. Such a page is
+never re-requested automatically, and the damaged file is left in place for
+inspection.
 
 Keep credentials on the OCR machine. Never copy `.secrets`, service-account
 JSON, tokens, or environment files to a scraping host.

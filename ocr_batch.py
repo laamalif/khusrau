@@ -43,6 +43,8 @@ def one(path, force=False):
     page = PageArtifacts(path, SUFFIX)
     state = page.state()
     if not force and state != "pending":
+        if state == "corrupt":
+            return Result(path, state, True, page.problem())
         last = page.last_attempt() or {}
         return Result(path, state, True, last.get("error") or last.get("finish"))
     request = {"model": MODEL, "thinking": THINKING, "mode": MODE}
@@ -55,10 +57,21 @@ def one(path, force=False):
                   (response.get("error") or "")[:200] or response.get("finish"))
 
 
+def _settle(path, future):
+    """A page's Result; an unexpected exception becomes that page's failure."""
+    try:
+        return future.result()
+    except Exception as error:                              # noqa: BLE001
+        # A paid response is never lost here: record() publishes the attempt
+        # before anything else can fail.
+        return Result(path, "exception", False, f"{type(error).__name__}: {error}")
+
+
 def run(paths, workers=WORKERS, force=False):
     paths = list(dict.fromkeys(os.path.abspath(path) for path in paths))
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        results = list(ex.map(lambda path: one(path, force), paths))
+        futures = [(path, ex.submit(one, path, force)) for path in paths]
+        results = [_settle(path, future) for path, future in futures]
     for result in results:
         label = "ok  " if result.ok else "FAIL"
         source = "cached" if result.cached else "new"

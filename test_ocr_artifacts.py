@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from ocr_artifacts import PageArtifacts
 
@@ -71,6 +72,27 @@ class PageStateTests(unittest.TestCase):
         _write(self.page.text, "")
         self.assertEqual(self.page.state(), "pending")
 
+    def test_truncated_canonical_response_is_corrupt(self):
+        _write(self.page.text, "full read\n")
+        _write(self.page.response, '{"text": "full re')
+        self.assertEqual(self.page.state(), "corrupt")
+
+    def test_non_object_canonical_response_is_corrupt(self):
+        _write(self.page.text, "full read\n")
+        _write(self.page.response, "[]")
+        self.assertEqual(self.page.state(), "corrupt")
+
+    def test_corrupt_response_without_text_is_corrupt(self):
+        _write(self.page.response, "\x00\x01")
+        self.assertEqual(self.page.state(), "corrupt")
+
+    def test_unreadable_attempt_record_is_corrupt_and_never_raises(self):
+        os.makedirs(self.page.attempts)
+        _write(os.path.join(self.page.attempts, "20261011T000000000000Z-abcdef.response.json"),
+               '{"err')
+        self.assertEqual(self.page.state(), "corrupt")
+        self.assertIsNone(self.page.last_attempt())
+
     def test_suffix_selects_a_separate_artifact_family(self):
         page = PageArtifacts(os.path.join(self.dir, "168.jpg"), suffix=".pro")
         self.assertEqual(page.text, os.path.join(self.dir, "168.pro.txt"))
@@ -126,6 +148,15 @@ class RecordTests(unittest.TestCase):
             self.page.attempts, attempt_id + ".superseded.response.json")
         self.assertEqual(_read(archived_response), old_response)
 
+    def test_forced_stop_over_corrupt_response_preserves_damaged_bytes(self):
+        _write(self.page.text, "old reading\n")
+        _write(self.page.response, '{"text": "old rea')
+        self.page.record(dict(STOP), {})
+        self.assertEqual(self.page.state(), "complete")
+        attempt_id = json.loads(_read(self.page.response))["attempt"]["id"]
+        archived = os.path.join(self.page.attempts, attempt_id + ".superseded.response.json")
+        self.assertEqual(_read(archived), '{"text": "old rea')
+
     def test_error_and_empty_attempts_are_recorded_but_never_promoted(self):
         _write(self.page.text, "supplied reading\n")
         self.assertEqual(self.page.record({"error": "HTTP 500"}, {}), "error")
@@ -138,6 +169,29 @@ class RecordTests(unittest.TestCase):
         for _ in range(5):
             self.page.record({"error": "HTTP 500"}, {})
         self.assertEqual(len(set(self._attempt_files())), 5)
+
+    def test_interrupted_attempt_write_publishes_nothing(self):
+        # The record is written but interrupted before it is durable; nothing may
+        # appear under its final name, and no temporary file may be left behind.
+        with patch("ocr_artifacts.os.fsync", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                self.page.record(dict(STOP), {})
+        names = os.listdir(self.page.attempts) if os.path.isdir(self.page.attempts) else []
+        self.assertEqual(names, [])
+        self.assertEqual(self.page.state(), "pending")
+        self.assertFalse(os.path.exists(self.page.text))
+
+    def test_attempt_publish_refuses_an_existing_id(self):
+        fixed = {"id": "20261011T000000000000Z-abcdef", "created_at": "2026-10-11T00:00:00Z"}
+        with patch("ocr_artifacts._new_attempt", return_value=fixed):
+            self.page.record({"error": "first"}, {})
+            with self.assertRaises(FileExistsError):
+                self.page.record({"error": "second"}, {})
+        with open(os.path.join(self.page.attempts, fixed["id"] + ".response.json"),
+                  encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["error"], "first")
+        leftovers = [n for n in os.listdir(self.page.attempts) if n.startswith(".khusrau-")]
+        self.assertEqual(leftovers, [])
 
     def test_record_leaves_no_temporary_files(self):
         self.page.record(dict(STOP), {})

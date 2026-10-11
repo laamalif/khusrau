@@ -348,6 +348,64 @@ class IntegrityTests(unittest.TestCase):
             with open(os.path.join(directory, "page.partial.txt"), encoding="utf-8") as f:
                 self.assertEqual(f.read(), "half\n")
 
+    def test_batch_reports_damaged_pages_and_still_processes_healthy_ones(self):
+        with tempfile.TemporaryDirectory() as directory:
+            corrupt_response, corrupt_attempt, healthy = (
+                os.path.join(directory, f"{n}.jpg") for n in ("001", "002", "003"))
+            with open(os.path.join(directory, "001.txt"), "w", encoding="utf-8") as f:
+                f.write("reading\n")
+            with open(os.path.join(directory, "001.response.json"), "w", encoding="utf-8") as f:
+                f.write('{"text": "rea')
+            attempts = os.path.join(directory, "002.attempts")
+            os.makedirs(attempts)
+            with open(os.path.join(attempts, "20261011T000000000000Z-abcdef.response.json"),
+                      "w", encoding="utf-8") as f:
+                f.write('{"err')
+            out = StringIO()
+            with patch.object(ocr_batch, "read_page",
+                              return_value={"text": "read", "finish": "STOP"}) as read_page, \
+                    redirect_stdout(out):
+                result = ocr_batch.run([corrupt_response, corrupt_attempt, healthy], workers=3)
+            read_page.assert_called_once()
+            self.assertEqual(read_page.call_args.args[0], healthy)
+            self.assertEqual(result, 1)
+            report = out.getvalue()
+            self.assertIn("FAIL 001.jpg: corrupt (cached, 001.response.json:", report)
+            self.assertIn("FAIL 002.jpg: corrupt (cached, "
+                          "20261011T000000000000Z-abcdef.response.json:", report)
+            self.assertIn("ok   003.jpg: complete", report)
+            self.assertIn("1 ok, 2 failed, of 3", report)
+
+    def test_batch_isolates_an_unexpected_page_exception(self):
+        with tempfile.TemporaryDirectory() as directory:
+            broken, healthy = (os.path.join(directory, f"{n}.jpg") for n in ("001", "002"))
+
+            def read(path, *args, **kwargs):
+                if path == broken:
+                    raise OSError("disk unplugged")
+                return {"text": "read", "finish": "STOP"}
+
+            out = StringIO()
+            with patch.object(ocr_batch, "read_page", side_effect=read), redirect_stdout(out):
+                result = ocr_batch.run([broken, healthy], workers=2)
+            self.assertEqual(result, 1)
+            self.assertIn("FAIL 001.jpg: exception (new, OSError: disk unplugged)", out.getvalue())
+            self.assertIn("ok   002.jpg: complete", out.getvalue())
+            self.assertIn("1 ok, 1 failed, of 2", out.getvalue())
+
+    def test_status_reports_corrupt_artifacts_as_unfinished(self):
+        with tempfile.TemporaryDirectory() as directory:
+            image = os.path.join(directory, "001.jpg")
+            with open(os.path.join(directory, "001.txt"), "w", encoding="utf-8") as f:
+                f.write("reading\n")
+            with open(os.path.join(directory, "001.response.json"), "w", encoding="utf-8") as f:
+                f.write("{")
+            out = StringIO()
+            with redirect_stdout(out):
+                result = khusrau.main(["status", image])
+            self.assertEqual(result, 1)
+            self.assertIn("corrupt", out.getvalue())
+
     def test_ocr_page_script_reuses_existing_canonical_text(self):
         with tempfile.TemporaryDirectory() as directory:
             image = os.path.join(directory, "page.jpg")
