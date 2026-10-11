@@ -10,12 +10,8 @@ Uncertain-word markers are requested because §17.2 found self-reported uncertai
 is calibrated -- it predicts where the real errors are, so it is a routing signal
 for the adjudication budget, not noise.
 
-Usage: ocr_page.py <image> [more images...]   -> writes <image>.txt beside a .json
+Usage: ocr_page.py [--force] <image ...>   (artifact rules: see ocr_artifacts.py)
 """
-import json
-import os
-import sys
-
 from vertex import generate, image_part
 
 SYSTEM = (
@@ -85,47 +81,11 @@ def read_page(path, model=None, thinking=None, max_tokens=32768, mode="verse"):
                     temperature=0, thinking=thinking)
 
 
-def artifact_paths(path, suffix=""):
-    base = os.path.splitext(path)[0] + suffix
-    return base + ".txt", base + ".partial.txt", base + ".response.json"
+def main(argv=None):
+    """Delegate to ocr_batch so both scripts share one set of artifact rules."""
+    import ocr_batch
 
-
-def write_response(path, response):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(response, f, ensure_ascii=False, indent=2)
-        f.write("\n")
-
-
-def main():
-    if len(sys.argv) < 2:
-        print("usage: ocr_page.py <image> [more images...]", file=sys.stderr)
-        return 2
-    model = os.environ.get("HTR_MODEL")
-    thinking = os.environ.get("HTR_THINKING")
-    mode = os.environ.get("HTR_MODE", "verse")
-    suffix = os.environ.get("HTR_SUFFIX", "")
-    failed = 0
-    for path in sys.argv[1:]:
-        r = read_page(path, model, thinking, mode=mode)
-        r["request"] = {"model": model, "thinking": thinking, "mode": mode}
-        out, partial, response = artifact_paths(path, suffix)
-        write_response(response, r)
-        if "error" in r:
-            print(f"{path}: ERROR {r['error'][:200]}", file=sys.stderr)
-            failed += 1
-            continue
-        text = r.get("text", "").strip()
-        complete = r.get("finish") == "STOP"
-        target = out if complete else partial
-        if text:
-            with open(target, "w", encoding="utf-8") as f:
-                f.write(text + "\n")
-        if not complete:
-            failed += 1
-        u = r.get("usage", {})
-        print(f"{path} -> {target if text else response}  finish={r.get('finish')}  "
-              f"in={u.get('promptTokenCount')} out={u.get('candidatesTokenCount')}")
-    return 1 if failed else 0
+    return ocr_batch.main(argv)
 
 
 if __name__ == "__main__":

@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
-"""Parallel page reader. Skips pages already transcribed so it is restartable.
+"""Parallel page reader. Restartable, and it never pays twice for a page.
 
 Sequential reading measured ~2 min/page on gemini-3.8-flash (thinking is on), so a
 20-page sample took 40 minutes. The calls are independent and network-bound, so a
 small thread pool is the whole fix.
 
 Restartability matters more than speed: siraj lost 168 already-paid-for calls to one
-malformed record killing the write. Here every page is written the moment it returns,
-and an existing .txt is never re-requested.
+malformed record killing the write. Here every attempt is recorded the moment it
+returns (see ocr_artifacts.py). A page with usable text or any recorded attempt is
+never requested again unless `force` is given. Even then, only a STOP read replaces
+the canonical text, and the text it replaces is archived first.
 
-Usage: ocr_batch.py <image ...>        [OCR_WORKERS=6]
+Usage: ocr_batch.py [--force] <image ...>        [OCR_WORKERS=6]
 """
-import json
+import argparse
 import os
-import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
+from typing import NamedTuple
 
-from ocr_page import artifact_paths, read_page, write_response
+from ocr_artifacts import DONE, PageArtifacts
+from ocr_page import read_page
 
 WORKERS = int(os.environ.get("OCR_WORKERS", "6"))
 MODEL = os.environ.get("HTR_MODEL")
@@ -25,56 +28,54 @@ SUFFIX = os.environ.get("HTR_SUFFIX", "")
 MODE = os.environ.get("HTR_MODE", "verse")
 
 
-def one(path):
-    out, partial, response = artifact_paths(path, SUFFIX)
-    if os.path.exists(out) and os.path.getsize(out) > 0:
-        return path, out, "cached", None
-    if os.path.exists(response):
-        with open(response, encoding="utf-8") as f:
-            recorded = json.load(f)
-        status = "cached_partial" if os.path.exists(partial) else "cached_error"
-        return path, partial if os.path.exists(partial) else response, status, recorded.get("finish")
-    r = read_page(path, MODEL, THINKING, mode=MODE)
-    r["request"] = {"model": MODEL, "thinking": THINKING, "mode": MODE}
-    write_response(response, r)
-    if "error" in r:
-        return path, response, "error", r["error"][:200]
-    txt = r.get("text", "").strip()
-    if not txt:
-        return path, response, "empty", r.get("finish")
-    if r.get("finish") != "STOP":
-        with open(partial, "w", encoding="utf-8") as f:
-            f.write(txt + "\n")
-        return path, partial, "partial", r.get("finish")
-    with open(out, "w", encoding="utf-8") as f:
-        f.write(txt + "\n")
-    return path, out, "STOP", r.get("usage", {}).get("candidatesTokenCount")
+class Result(NamedTuple):
+    path: str
+    status: str        # an ocr_artifacts state, or a record() outcome
+    cached: bool       # True when no request was made
+    detail: object     # finish reason, error text, or output token count
+
+    @property
+    def ok(self):
+        return self.status in DONE
 
 
-def run(paths, workers=WORKERS):
-    done = fail = 0
+def one(path, force=False):
+    page = PageArtifacts(path, SUFFIX)
+    state = page.state()
+    if not force and state != "pending":
+        last = page.last_attempt() or {}
+        return Result(path, state, True, last.get("error") or last.get("finish"))
+    request = {"model": MODEL, "thinking": THINKING, "mode": MODE}
+    response = read_page(path, MODEL, THINKING, mode=MODE)
+    outcome = page.record(response, request)
+    if outcome == "complete":
+        return Result(path, "complete", False,
+                      response.get("usage", {}).get("candidatesTokenCount"))
+    return Result(path, outcome, False,
+                  (response.get("error") or "")[:200] or response.get("finish"))
+
+
+def run(paths, workers=WORKERS, force=False):
+    paths = list(dict.fromkeys(os.path.abspath(path) for path in paths))
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        futs = [ex.submit(one, p) for p in paths]
-        for f in as_completed(futs):
-            path, out, status, extra = f.result()
-            if status in ("error", "empty", "partial", "cached_partial", "cached_error"):
-                fail += 1
-                print(f"FAIL {os.path.basename(path)}: {status} {extra}", flush=True)
-            else:
-                done += 1
-                flag = "" if status in ("STOP", "cached") else f"  !! finish={status}"
-                print(f"ok   {os.path.basename(path)} -> {os.path.basename(out)} "
-                      f"({status}, out={extra}){flag}", flush=True)
-    print(f"\n{done} ok, {fail} failed, of {len(paths)}")
-    return 1 if fail else 0
+        results = list(ex.map(lambda path: one(path, force), paths))
+    for result in results:
+        label = "ok  " if result.ok else "FAIL"
+        source = "cached" if result.cached else "new"
+        print(f"{label} {os.path.basename(result.path)}: {result.status} "
+              f"({source}, {result.detail})", flush=True)
+    failed = sum(not result.ok for result in results)
+    print(f"\n{len(results) - failed} ok, {failed} failed, of {len(results)}")
+    return 1 if failed else 0
 
 
-def main():
-    paths = sys.argv[1:]
-    if not paths:
-        print("usage: ocr_batch.py <image ...>", file=sys.stderr)
-        return 2
-    return run(paths)
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Transcribe page images with Gemini.")
+    parser.add_argument("images", nargs="+")
+    parser.add_argument("--force", action="store_true",
+                        help="request again even if text or an attempt is recorded")
+    args = parser.parse_args(argv)
+    return run(args.images, force=args.force)
 
 
 if __name__ == "__main__":

@@ -109,25 +109,17 @@ def _rekhta_status(directory):
 
 
 def cmd_status(args):
-    from ocr_page import artifact_paths
+    from ocr_artifacts import DONE, STATES, PageArtifacts
 
     if not args.images and not args.category and not args.rekhta_dir:
         print("khusrau status: provide images, --category, and/or --rekhta-dir",
               file=sys.stderr)
         return 2
-    counts = {"complete": 0, "partial": 0, "failed": 0, "pending": 0}
+    counts = dict.fromkeys(STATES, 0)
     for path in args.images:
-        complete, partial, response = artifact_paths(path, args.suffix)
-        if os.path.isfile(complete) and os.path.getsize(complete):
-            state = "complete"
-        elif os.path.isfile(partial) and os.path.getsize(partial):
-            state = "partial"
-        elif os.path.isfile(response):
-            state = "failed"
-        else:
-            state = "pending"
+        state = PageArtifacts(path, args.suffix).state()
         counts[state] += 1
-        print(f"{state:8s} {path}")
+        print(f"{state:10s} {path}")
 
     reference_bad = 0
     if args.category:
@@ -164,7 +156,8 @@ def cmd_status(args):
 
     if args.images:
         print("\nOCR: " + ", ".join(f"{name}={count}" for name, count in counts.items()))
-    return 1 if counts["partial"] or counts["failed"] or counts["pending"] or reference_bad else 0
+    unfinished = sum(count for state, count in counts.items() if state not in DONE)
+    return 1 if unfinished or reference_bad else 0
 
 
 def cmd_ocr(args):
@@ -174,7 +167,7 @@ def cmd_ocr(args):
     ocr_batch.THINKING = args.thinking
     ocr_batch.SUFFIX = args.suffix
     ocr_batch.MODE = args.mode
-    return ocr_batch.run(args.images, workers=args.workers)
+    return ocr_batch.run(args.images, workers=args.workers, force=args.force)
 
 
 def cmd_reference_fetch(args):
@@ -313,8 +306,11 @@ def build_parser():
     status.add_argument("--suffix", help="OCR artifact suffix")
     status.set_defaults(func=cmd_status)
 
-    ocr = sub.add_parser("ocr", help="transcribe images; recorded responses are never retried")
+    ocr = sub.add_parser("ocr", help="transcribe images; recorded pages are never re-requested")
     ocr.add_argument("images", nargs="*")
+    ocr.add_argument("--force", action="store_true",
+                     help="pay for a new attempt even if text or an attempt is recorded; "
+                          "only a STOP read replaces canonical text, which is archived first")
     ocr.add_argument("--workers", type=_positive_int)
     ocr.add_argument("--model")
     ocr.add_argument("--thinking")

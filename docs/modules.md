@@ -4,7 +4,8 @@
 |---|---|
 | `khusrau.py` | Unified command-line interface |
 | `vertex.py` | Guarded Vertex AI model access |
-| `ocr_page.py`, `ocr_batch.py` | Verse, prose, and dictionary OCR artifacts |
+| `ocr_page.py`, `ocr_batch.py` | Verse, prose, and dictionary OCR requests |
+| `ocr_artifacts.py` | OCR artifact state and append-only attempt records |
 | `ganjoor.py`, `verify_ganjoor.py` | Ganjoor retrieval, indexing, and validation |
 | `rekhta*.py` | Rekhta verse and prose extraction |
 | `corpus.py` | Reference-divan loading and radīf grouping |

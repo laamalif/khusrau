@@ -25,6 +25,7 @@ Common local checks:
 
 ```bash
 uv run python test_integrity.py
+uv run python test_ocr_artifacts.py
 uv run python test_norm.py
 uv run python selftest_align.py
 uv run python -m py_compile *.py
@@ -37,7 +38,8 @@ It is expected to fail when the external reference corpus is unavailable.
 ## Repository Map
 
 - `khusrau.py`: unified command-line interface.
-- `ocr_page.py`, `ocr_batch.py`, `vertex.py`: paid Gemini OCR and artifacts.
+- `ocr_page.py`, `ocr_batch.py`, `vertex.py`: paid Gemini OCR.
+- `ocr_artifacts.py`: local OCR artifact state and append-only attempt records.
 - `ganjoor.py`, `verify_ganjoor.py`: Ganjoor retrieval and cache validation.
 - `rekhta*.py`: Rekhta verse and prose extraction.
 - `manufacture.py`, `selftest_align.py`: verse retrieval and tier assignment.
@@ -51,8 +53,12 @@ It is expected to fail when the external reference corpus is unavailable.
 
 - Never make a Gemini call unless the user explicitly requests OCR or a model
   probe. Model access must remain guarded by `HTR_MODEL_ACCESS=1`.
-- Reuse existing `.response.json`, `.txt`, and `.partial.txt` artifacts. Do not
-  retry partial or failed pages automatically; API calls have a real cost.
+- Reuse existing `.response.json`, `.txt`, `.partial.txt`, and `.attempts/`
+  artifacts. Do not retry partial or failed pages automatically; API calls have
+  a real cost. Re-requesting a page requires an explicit `--force`.
+- All OCR artifact writes go through `ocr_artifacts.PageArtifacts`. Attempts are
+  write-once; the canonical text is replaced only by a STOP attempt, and the
+  replaced text is archived first.
 - A response is complete only when its finish reason is `STOP`. Never promote a
   truncated or failed response to the canonical `.txt` transcription.
 - Keep Gemini credentials local. Never copy `.secrets`, service-account JSON,

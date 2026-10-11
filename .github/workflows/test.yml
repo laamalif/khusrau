@@ -15,6 +15,6 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv sync
       - run: uv run python test_norm.py
-      - run: uv run python -m unittest -v test_integrity.py
+      - run: uv run python -m unittest -v test_integrity.py test_ocr_artifacts.py
       - run: uv run python -m compileall -q .
       - run: uv run python khusrau.py --help

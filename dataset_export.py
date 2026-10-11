@@ -141,6 +141,7 @@ def build_manifest(images, output, dataset, status="candidate", mode=None,
                 "thinking": thinking or request.get("thinking"),
                 "finish": finish,
                 "usage": response_data.get("usage") or {},
+                "attempt": response_data.get("attempt"),
             },
         }
         if reference:

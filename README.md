@@ -153,10 +153,20 @@ export GOOGLE_APPLICATION_CREDENTIALS="$PWD/.secrets/service_account.json"
 uv run python khusrau.py --config khusrau.toml ocr
 ```
 
-Model calls cost money. Khusrau records each response beside its image and does
-not automatically retry recorded partial or failed responses. Only a response
-whose finish reason is `STOP` becomes the canonical `.txt`; unfinished text is
-written to `.partial.txt`.
+Model calls cost money. A page that already has text, or any recorded attempt,
+is never requested again. Duplicate paths are read once. `--force` pays for a
+new attempt explicitly.
+
+Each attempt is saved once, with an id and a timestamp, under
+`<page>.attempts/`, and it is never overwritten. The canonical `.txt` and
+`.response.json` change together, and only when an attempt finishes with
+`STOP`. The text they replace is archived in the attempts directory first.
+Unfinished text is written to `.partial.txt` and leaves the canonical text
+untouched, so a failed rerun cannot lose a paid or reviewed reading.
+
+`status` reports each page as `complete` (the text matches its STOP response),
+`edited` (the text differs from its response), `unrecorded` (text with no
+response), or as an unfinished `partial`, `failed`, or `pending`.
 
 Keep credentials on the OCR machine. Never copy `.secrets`, service-account
 JSON, tokens, or environment files to a scraping host.

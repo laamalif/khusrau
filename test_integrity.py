@@ -301,10 +301,63 @@ class IntegrityTests(unittest.TestCase):
             with open(partial, "w", encoding="utf-8") as f:
                 f.write("partial\n")
             with patch.object(ocr_batch, "read_page") as read_page:
-                _, output, status, finish = ocr_batch.one(image)
+                result = ocr_batch.one(image)
             read_page.assert_not_called()
-            self.assertEqual(output, partial)
-            self.assertEqual((status, finish), ("cached_partial", "MAX_TOKENS"))
+            self.assertTrue(result.cached)
+            self.assertEqual((result.status, result.detail), ("partial", "MAX_TOKENS"))
+
+    def test_batch_never_rerequests_failed_or_supplied_pages(self):
+        with tempfile.TemporaryDirectory() as directory:
+            failed = os.path.join(directory, "001.jpg")
+            supplied = os.path.join(directory, "002.jpg")
+            with open(os.path.join(directory, "001.response.json"), "w", encoding="utf-8") as f:
+                json.dump({"error": "HTTP 500"}, f)
+            with open(os.path.join(directory, "002.txt"), "w", encoding="utf-8") as f:
+                f.write("supplied reading\n")
+            with patch.object(ocr_batch, "read_page") as read_page, \
+                    redirect_stdout(StringIO()):
+                result = ocr_batch.run([failed, supplied], workers=2)
+            read_page.assert_not_called()
+            self.assertEqual(result, 1)
+
+    def test_batch_collapses_duplicate_paths_to_one_request(self):
+        with tempfile.TemporaryDirectory() as directory:
+            image = os.path.join(directory, "page.jpg")
+            aliases = [image, image, os.path.join(directory, ".", "page.jpg")]
+            with patch.object(ocr_batch, "read_page",
+                              return_value={"text": "read", "finish": "STOP"}) as read_page, \
+                    redirect_stdout(StringIO()):
+                result = ocr_batch.run(aliases, workers=3)
+            self.assertEqual(read_page.call_count, 1)
+            self.assertEqual(result, 0)
+
+    def test_forced_incomplete_rerun_keeps_canonical_text(self):
+        with tempfile.TemporaryDirectory() as directory:
+            image = os.path.join(directory, "page.jpg")
+            text = os.path.join(directory, "page.txt")
+            with open(text, "w", encoding="utf-8") as f:
+                f.write("reviewed reading\n")
+            truncated = {"text": "half", "finish": "MAX_TOKENS"}
+            with patch.object(ocr_batch, "read_page", return_value=truncated) as read_page, \
+                    redirect_stdout(StringIO()):
+                result = ocr_batch.run([image], workers=1, force=True)
+            self.assertEqual(read_page.call_count, 1)
+            self.assertEqual(result, 1)
+            with open(text, encoding="utf-8") as f:
+                self.assertEqual(f.read(), "reviewed reading\n")
+            with open(os.path.join(directory, "page.partial.txt"), encoding="utf-8") as f:
+                self.assertEqual(f.read(), "half\n")
+
+    def test_ocr_page_script_reuses_existing_canonical_text(self):
+        with tempfile.TemporaryDirectory() as directory:
+            image = os.path.join(directory, "page.jpg")
+            with open(os.path.join(directory, "page.txt"), "w", encoding="utf-8") as f:
+                f.write("existing\n")
+            with patch.object(ocr_batch, "read_page") as read_page, \
+                    redirect_stdout(StringIO()):
+                result = ocr_page.main([image])
+            read_page.assert_not_called()
+            self.assertEqual(result, 0)
 
     def test_dictionary_mode_uses_two_column_ocr_prompt(self):
         with patch.object(ocr_page, "image_part", return_value={"image": "test"}), \
@@ -323,6 +376,31 @@ class IntegrityTests(unittest.TestCase):
                     result = khusrau.main(["status", image])
             network.assert_not_called()
             self.assertEqual(result, 1)
+
+    def test_status_reports_explicit_artifact_states(self):
+        with tempfile.TemporaryDirectory() as directory:
+            images = [os.path.join(directory, f"{n}.jpg") for n in ("001", "002", "003")]
+            with open(os.path.join(directory, "001.txt"), "w", encoding="utf-8") as f:
+                f.write("hand corrected\n")
+            with open(os.path.join(directory, "001.response.json"), "w", encoding="utf-8") as f:
+                json.dump({"text": "model read", "finish": "STOP"}, f)
+            with open(os.path.join(directory, "002.txt"), "w", encoding="utf-8") as f:
+                f.write("supplied reading\n")
+            out = StringIO()
+            with redirect_stdout(out):
+                result = khusrau.main(["status", *images[:2]])
+            self.assertEqual(result, 0)
+            self.assertIn("edited", out.getvalue())
+            self.assertIn("unrecorded", out.getvalue())
+            with redirect_stdout(StringIO()):
+                self.assertEqual(khusrau.main(["status", *images]), 1)
+
+    def test_ocr_force_is_explicit_and_passed_through(self):
+        with patch.object(ocr_batch, "run", return_value=0) as run:
+            khusrau.main(["ocr", "page.jpg"])
+            khusrau.main(["ocr", "--force", "page.jpg"])
+        self.assertFalse(run.call_args_list[0].kwargs["force"])
+        self.assertTrue(run.call_args_list[1].kwargs["force"])
 
     def test_align_writes_data_and_metadata_atomically(self):
         class FakeIndex:
@@ -476,6 +554,21 @@ class IntegrityTests(unittest.TestCase):
             exported = export_pages(manifest, destination, allow_candidate=True)
             self.assertEqual(exported[0]["export_image"], "anandi-168.jpg")
             self.assertTrue(os.path.isfile(os.path.join(destination, "anandi-168.txt")))
+
+    def test_manifest_records_attempt_provenance(self):
+        from ocr_artifacts import PageArtifacts
+
+        with tempfile.TemporaryDirectory() as directory:
+            image = os.path.join(directory, "168.jpg")
+            with open(image, "wb") as f:
+                f.write(b"image")
+            page = PageArtifacts(image)
+            page.record({"text": "read", "finish": "STOP"}, {"model": "m", "mode": "verse"})
+            with open(page.response, encoding="utf-8") as f:
+                attempt = json.load(f)["attempt"]
+            records = build_manifest([image], os.path.join(directory, "m.jsonl"), "ds")
+        self.assertEqual(records[0]["ocr"]["attempt"], attempt)
+        self.assertEqual(records[0]["ocr"]["model"], "m")
 
     def test_page_export_detects_changed_text(self):
         with tempfile.TemporaryDirectory() as directory:
