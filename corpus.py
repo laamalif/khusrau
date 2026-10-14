@@ -25,21 +25,7 @@ from collections import Counter, defaultdict
 from urdu_norm import norm_match
 
 
-def _default_corpus() -> str:
-    env = os.environ.get("REKHTA_CORPUS")
-    if env:
-        return env
-    project_corpus = os.path.join(os.path.dirname(os.path.abspath(__file__)), "work", "corpus")
-    if os.path.isdir(project_corpus):
-        return project_corpus
-    config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
-    user_corpus = os.path.join(config_home, "khusrau", "corpus")
-    if os.path.isdir(user_corpus):
-        return user_corpus
-    return project_corpus
-
-
-CORPUS = _default_corpus()
+CORPUS = os.environ.get("REKHTA_CORPUS")
 
 _SLUG = re.compile(r"^(?P<slug>.+?)-(?P<poet>[a-z]+-[a-z]+)-ghazals(?:-\d+)?$")
 
@@ -86,12 +72,15 @@ class Ghazal:
 
 
 def load(path: str | None = None, poet: str | None = None) -> list[Ghazal]:
-    if path is None:
-        path = CORPUS
+    path = path or os.environ.get("REKHTA_CORPUS")
+    if not path:
+        raise ValueError(
+            "reference corpus directory required: pass path or set REKHTA_CORPUS"
+        )
     if not os.path.isdir(path):
         raise FileNotFoundError(
             f"reference corpus directory not found: {path} "
-            "(set REKHTA_CORPUS environment variable or provide a valid path)"
+            "(pass path or set REKHTA_CORPUS to a valid directory)"
         )
     out = []
     for name in sorted(os.listdir(path)):
@@ -117,9 +106,19 @@ def radif_families(ghazals: list[Ghazal]) -> dict[tuple, list[Ghazal]]:
     return dict(fam)
 
 
-def main():
-    poet = sys.argv[1] if len(sys.argv) > 1 else None
-    gs = load(poet=poet)
+def main(argv=None):
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("poet_pos", nargs="?", metavar="poet", help="optional poet filter")
+    parser.add_argument("--poet", dest="poet_flag", help="optional poet filter")
+    parser.add_argument("--corpus", help="path to reference corpus directory (default: $REKHTA_CORPUS)")
+    args = parser.parse_args(argv)
+    poet = args.poet_flag or args.poet_pos
+    try:
+        gs = load(path=args.corpus, poet=poet)
+    except (ValueError, FileNotFoundError) as err:
+        print(f"corpus: {err}", file=sys.stderr)
+        return 2
     print(f"corpus: {len(gs)} ghazals, {sum(len(g.lines) for g in gs):,} hemistichs, "
           f"{sum(len(g.tokens) for g in gs):,} tokens"
           + (f"  [poet filter: {poet}]" if poet else ""))
@@ -153,7 +152,8 @@ def main():
         share.sort()
         print(f"\nradif share of a rhyming hemistich's tokens: "
               f"median {share[len(share)//2]:.2f}  p90 {share[int(.9*len(share))]:.2f}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

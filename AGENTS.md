@@ -27,13 +27,13 @@ Common local checks:
 uv run python test_integrity.py
 uv run python test_ocr_artifacts.py
 uv run python test_norm.py
-uv run python selftest_align.py
 uv run python -m py_compile *.py
 git diff --check
 ```
 
-`uv run python test_norm.py --corpus` is an additional corpus-dependent check.
-It is expected to fail when the external reference corpus is unavailable.
+`uv run python selftest_align.py`, `uv run python reject_test.py`, and
+`uv run python test_norm.py --corpus` are additional corpus-dependent checks.
+They require an external reference corpus passed via `--corpus` or `REKHTA_CORPUS`.
 
 ## Repository Map
 

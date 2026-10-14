@@ -213,9 +213,20 @@ class HemistichVote(Scorer):
 
 # ---------------------------------------------------------------- harness
 
-def run():
-    poet_filter = sys.argv[1] if len(sys.argv) > 1 else None
-    ghazals = load(poet=poet_filter)
+def run(argv=None):
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("poet_pos", nargs="?", metavar="poet", help="optional poet filter")
+    parser.add_argument("--poet", dest="poet_flag", help="optional poet filter")
+    parser.add_argument("--corpus", help="path to reference corpus directory (default: $REKHTA_CORPUS)")
+    args = parser.parse_args(argv)
+    poet = args.poet_flag or args.poet_pos
+    try:
+        ghazals = load(path=args.corpus, poet=poet)
+    except (ValueError, FileNotFoundError) as err:
+        print(f"selftest_align: {err}", file=sys.stderr)
+        return 2
+    poet_filter = poet
     fam = radif_families(ghazals)
     by_poet = defaultdict(set)
     for g in ghazals:
@@ -301,4 +312,4 @@ def shares_radif(a, b):
 
 
 if __name__ == "__main__":
-    run()
+    sys.exit(run())

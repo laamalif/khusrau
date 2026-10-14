@@ -643,10 +643,25 @@ class IntegrityTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "content hash mismatch"):
                 export_pages(manifest, os.path.join(directory, "export"))
 
-    def test_corpus_load_missing_directory_raises_descriptive_error(self):
+    def test_corpus_load_missing_directory_raises_file_not_found(self):
         with self.assertRaises(FileNotFoundError) as ctx:
             corpus.load("/nonexistent/corpus/path")
         self.assertIn("REKHTA_CORPUS", str(ctx.exception))
+
+    def test_corpus_load_without_path_or_env_raises_value_error(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(ValueError) as ctx:
+                corpus.load()
+            self.assertIn("REKHTA_CORPUS", str(ctx.exception))
+
+    def test_corpus_load_uses_rekhta_corpus_env(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ghazal_path = os.path.join(directory, "sample-ghazal-mirza-ghalib-ghazals.txt")
+            with open(ghazal_path, "w", encoding="utf-8") as f:
+                f.write("نقش فریادی ہے کس کی شوخی تحریر کا\n" * 4)
+            with patch.dict(os.environ, {"REKHTA_CORPUS": directory}):
+                ghazals = corpus.load()
+            self.assertEqual(len(ghazals), 1)
 
     def test_corpus_load_reads_valid_directory(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -662,36 +677,28 @@ class IntegrityTests(unittest.TestCase):
             self.assertEqual(ghazals[0].poet, "mirza-ghalib")
             self.assertEqual(len(ghazals[0].lines), 4)
 
-    def test_corpus_default_path_precedence(self):
-        with patch.dict(os.environ, {"REKHTA_CORPUS": "/custom/env/corpus"}):
-            self.assertEqual(corpus._default_corpus(), "/custom/env/corpus")
+    def test_selftest_align_without_corpus_exits_cleanly(self):
+        import selftest_align
+        err = StringIO()
+        with patch.dict(os.environ, {}, clear=True), redirect_stderr(err):
+            code = selftest_align.run([])
+        self.assertEqual(code, 2)
+        self.assertIn("REKHTA_CORPUS", err.getvalue())
 
-        with patch.dict(os.environ, {}, clear=True):
-            # When work/corpus exists
-            with patch("os.path.isdir", side_effect=lambda p: p.endswith(os.path.join("work", "corpus"))):
-                expected = os.path.join(os.path.dirname(os.path.abspath(corpus.__file__)), "work", "corpus")
-                self.assertEqual(corpus._default_corpus(), expected)
+    def test_reject_test_without_corpus_exits_cleanly(self):
+        import reject_test
+        err = StringIO()
+        with patch.dict(os.environ, {}, clear=True), redirect_stderr(err):
+            code = reject_test.main([])
+        self.assertEqual(code, 2)
+        self.assertIn("REKHTA_CORPUS", err.getvalue())
 
-            # When work/corpus is missing, but user config corpus exists
-            config_path = os.path.join(os.path.expanduser("~/.config"), "khusrau", "corpus")
-            with patch("os.path.isdir", side_effect=lambda p: p == config_path):
-                self.assertEqual(corpus._default_corpus(), config_path)
-
-            # When neither exists
-            with patch("os.path.isdir", return_value=False):
-                expected = os.path.join(os.path.dirname(os.path.abspath(corpus.__file__)), "work", "corpus")
-                self.assertEqual(corpus._default_corpus(), expected)
-
-    def test_corpus_load_default_missing_raises_descriptive_error(self):
-        with patch.object(corpus, "CORPUS", "/nonexistent/default/corpus"):
-            with self.assertRaises(FileNotFoundError) as ctx:
-                corpus.load()
-            self.assertIn("REKHTA_CORPUS", str(ctx.exception))
-
-    def test_corpus_default_path_not_hardcoded_user(self):
-        import inspect
-        source = inspect.getsource(corpus._default_corpus)
-        self.assertNotIn("/home/nomad", source)
+    def test_corpus_main_without_corpus_exits_cleanly(self):
+        err = StringIO()
+        with patch.dict(os.environ, {}, clear=True), redirect_stderr(err):
+            code = corpus.main([])
+        self.assertEqual(code, 2)
+        self.assertIn("REKHTA_CORPUS", err.getvalue())
 
 
 if __name__ == "__main__":
