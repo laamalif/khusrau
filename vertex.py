@@ -183,5 +183,5 @@ if __name__ == "__main__":
     m = sys.argv[1] if len(sys.argv) > 1 else None
     print("project:", project_id())
     print("token:", "ok" if token() else "FAILED")
-    r = generate([{"text": "Reply with exactly: pong"}], model=m, max_tokens=32)
+    r = generate([{"text": "Reply with exactly: pong"}], model=m, max_tokens=128)
     print("probe:", json.dumps(r, ensure_ascii=False)[:400])
