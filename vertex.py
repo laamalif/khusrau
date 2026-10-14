@@ -71,13 +71,13 @@ def token():
         return _tok["v"]
 
 
+DEFAULT_MODEL = os.environ.get("HTR_MODEL", "gemini-3.8-flash")
+FALLBACK_MODEL = os.environ.get("HTR_FALLBACK_MODEL", "gemini-3.7-flash")
+
+
 def _endpoint(model):
-    # gemini-3.x is global-only; 2.5 lives in a region.
-    if model.startswith("gemini-3"):
-        host, loc = "aiplatform.googleapis.com", "global"
-    else:
-        loc = os.environ.get("VERTEX_LOCATION", "us-central1")
-        host = f"{loc}-aiplatform.googleapis.com"
+    loc = os.environ.get("VERTEX_LOCATION", "global")
+    host = "aiplatform.googleapis.com" if loc == "global" else f"{loc}-aiplatform.googleapis.com"
     return (f"https://{host}/v1/projects/{project_id()}/locations/{loc}"
             f"/publishers/google/models/{model}:generateContent")
 
@@ -116,16 +116,18 @@ def generate(parts, model=None, system=None, max_tokens=8192,
     """
     if os.environ.get("HTR_MODEL_ACCESS") != "1":
         raise PermissionError(REVOKED)
-    # Probed 2026-09-04 on this project: gemini-3.8-flash, gemini-3.6-flash,
-    # gemini-3.1-pro-preview and gemini-2.5-flash all resolve. The `-preview`
-    # and `gemini-flash-latest` aliases 404.
-    model = model or os.environ.get("HTR_MODEL", "gemini-3.8-flash")
+    primary = model or DEFAULT_MODEL
+    fallback = None if (model and model != DEFAULT_MODEL) else FALLBACK_MODEL
+    candidates = [primary]
+    if fallback and fallback != primary:
+        candidates.append(fallback)
+
     cfg = {"maxOutputTokens": max_tokens}
     if json_out:
         cfg["responseMimeType"] = "application/json"
     if temperature is not None:
         cfg["temperature"] = temperature
-    if thinking and model.startswith("gemini-3"):
+    if thinking and thinking not in ("off", "none", "0"):
         cfg["thinkingConfig"] = {"thinkingLevel": thinking}
     body = {"contents": [{"role": "user", "parts": parts}], "generationConfig": cfg}
     if system:
@@ -133,25 +135,30 @@ def generate(parts, model=None, system=None, max_tokens=8192,
     data = json.dumps(body).encode()
 
     last = None
-    for a in range(retries + 1):
-        try:
-            req = urllib.request.Request(_endpoint(model), data=data, headers={
-                "Authorization": f"Bearer {token()}",
-                "Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=300) as r:
-                d = json.loads(r.read())
-            c = (d.get("candidates") or [{}])[0]
-            txt = "".join(p.get("text", "")
-                          for p in (c.get("content") or {}).get("parts") or [])
-            return {"text": txt, "finish": c.get("finishReason"),
-                    "usage": d.get("usageMetadata", {})}
-        except urllib.error.HTTPError as e:
-            last = f"HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:400]}"
-            if e.code in (400, 401, 403, 404):     # not transient; do not retry
-                break
-        except Exception as e:                      # noqa: BLE001
-            last = f"{type(e).__name__}: {e}"
-        time.sleep(min(2 ** a, 20))
+    for active_model in candidates:
+        for a in range(retries + 1):
+            try:
+                req = urllib.request.Request(_endpoint(active_model), data=data, headers={
+                    "Authorization": f"Bearer {token()}",
+                    "Content-Type": "application/json"})
+                with urllib.request.urlopen(req, timeout=300) as r:
+                    d = json.loads(r.read())
+                c = (d.get("candidates") or [{}])[0]
+                txt = "".join(p.get("text", "")
+                              for p in (c.get("content") or {}).get("parts") or [])
+                return {"text": txt, "finish": c.get("finishReason"),
+                        "usage": d.get("usageMetadata", {}),
+                        "model": active_model}
+            except urllib.error.HTTPError as e:
+                last = f"HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:400]}"
+                if e.code == 404:
+                    # Model not available; break retry loop to try fallback candidate
+                    break
+                if e.code in (400, 401, 403):     # non-retryable auth/client error
+                    return {"error": last}
+            except Exception as e:                      # noqa: BLE001
+                last = f"{type(e).__name__}: {e}"
+            time.sleep(min(2 ** a, 20))
     return {"error": last}
 
 

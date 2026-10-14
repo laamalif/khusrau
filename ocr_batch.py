@@ -20,6 +20,7 @@ from typing import NamedTuple
 
 from ocr_artifacts import DONE, PageArtifacts
 from ocr_page import read_page
+from vertex import DEFAULT_MODEL
 
 WORKERS = int(os.environ.get("OCR_WORKERS", "6"))
 MODEL = os.environ.get("HTR_MODEL")
@@ -47,8 +48,10 @@ def one(path, force=False):
             return Result(path, state, True, page.problem())
         last = page.last_attempt() or {}
         return Result(path, state, True, last.get("error") or last.get("finish"))
-    request = {"model": MODEL, "thinking": THINKING, "mode": MODE}
-    response = read_page(path, MODEL, THINKING, mode=MODE)
+    active_model = MODEL or DEFAULT_MODEL
+    response = read_page(path, active_model, THINKING, mode=MODE)
+    actual_model = response.get("model") or active_model
+    request = {"model": actual_model, "thinking": THINKING, "mode": MODE}
     outcome = page.record(response, request)
     if outcome == "complete":
         return Result(path, "complete", False,

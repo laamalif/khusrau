@@ -58,12 +58,13 @@ def apply_project(args, config, base):
     if command == "status" and not args.rekhta_dir:
         directory = _config_value(config, "reference", "rekhta", "directory")
         args.rekhta_dir = _paths([directory], base)[0] if directory else None
-    if command == "ocr":
+    if command == "ocr" or (command == "dictionary" and getattr(args, "dictionary_command", None) == "extract"):
         ocr = config.get("ocr", {})
-        args.workers = args.workers or ocr.get("workers") or int(os.environ.get("OCR_WORKERS", "6"))
         args.model = args.model or ocr.get("model") or os.environ.get("HTR_MODEL")
         args.thinking = args.thinking or ocr.get("thinking") or os.environ.get("HTR_THINKING")
-        args.mode = args.mode or ocr.get("mode") or os.environ.get("HTR_MODE", "verse")
+        if command == "ocr":
+            args.workers = args.workers or ocr.get("workers") or int(os.environ.get("OCR_WORKERS", "6"))
+            args.mode = args.mode or ocr.get("mode") or os.environ.get("HTR_MODE", "verse")
     if command in ("status", "ocr"):
         args.suffix = args.suffix if args.suffix is not None else (
             _config_value(config, "ocr", "suffix") or os.environ.get("HTR_SUFFIX", ""))
@@ -393,8 +394,8 @@ def build_parser():
     extract.add_argument("-o", "--output", required=True)
     extract.add_argument("--response", required=True)
     extract.add_argument("--dataset", default="farhangiadabiyat")
-    extract.add_argument("--model", default="gemini-3.8-flash")
-    extract.add_argument("--thinking", default="low")
+    extract.add_argument("--model", help="model name (default: $HTR_MODEL or gemini-3.8-flash)")
+    extract.add_argument("--thinking", help="thinking level (default: $HTR_THINKING or low)")
     extract.add_argument("--reuse-response", action="store_true",
                          help="publish an existing response without an API call")
     extract.set_defaults(func=cmd_dictionary_extract)

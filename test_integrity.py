@@ -426,6 +426,64 @@ class IntegrityTests(unittest.TestCase):
         self.assertIn("RIGHT column completely", system)
         self.assertIn("modern printed Urdu", system)
 
+    def test_vertex_endpoint_defaults_to_global_location(self):
+        import vertex
+        with patch.object(vertex, "project_id", return_value="test-proj"), \
+                patch.dict(os.environ, {}, clear=True):
+            endpoint = vertex._endpoint("gemini-custom-flash")
+            self.assertIn("https://aiplatform.googleapis.com/v1/projects/test-proj/locations/global/", endpoint)
+            self.assertIn("/publishers/google/models/gemini-custom-flash:generateContent", endpoint)
+
+    def test_vertex_endpoint_respects_custom_location(self):
+        import vertex
+        with patch.object(vertex, "project_id", return_value="test-proj"), \
+                patch.dict(os.environ, {"VERTEX_LOCATION": "europe-west1"}):
+            endpoint = vertex._endpoint("gemini-custom-flash")
+            self.assertIn("https://europe-west1-aiplatform.googleapis.com/v1/projects/test-proj/locations/europe-west1/", endpoint)
+
+    def test_vertex_generate_falls_back_when_primary_model_404s(self):
+        import vertex
+        import urllib.error
+        from io import BytesIO
+
+        called_models = []
+
+        def fake_urlopen(req, timeout=300):
+            url = req.full_url
+            for m in ("gemini-3.8-flash", "gemini-3.7-flash"):
+                if m in url:
+                    called_models.append(m)
+            if "gemini-3.8-flash" in url:
+                fp = BytesIO(b"model not found")
+                raise urllib.error.HTTPError(url, 404, "Not Found", {}, fp)
+            body = json.dumps({"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": "fallback text"}]}}]}).encode()
+            return BytesIO(body)
+
+        with patch.dict(os.environ, {"HTR_MODEL_ACCESS": "1"}), \
+                patch.object(vertex, "token", return_value="fake-token"), \
+                patch.object(vertex, "project_id", return_value="test-proj"), \
+                patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            res = vertex.generate([{"text": "test"}])
+            self.assertEqual(res["text"], "fallback text")
+            self.assertEqual(res["model"], "gemini-3.7-flash")
+            self.assertEqual(called_models, ["gemini-3.8-flash", "gemini-3.7-flash"])
+
+    def test_dictionary_extract_inherits_model_from_config_or_env(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = os.path.join(directory, "khusrau.toml")
+            with open(config, "w", encoding="utf-8") as f:
+                f.write('[ocr]\nmodel = "gemini-test-custom"\nthinking = "high"\n')
+            with patch("dictionary_extract.extract") as mock_extract, \
+                    redirect_stdout(StringIO()):
+                khusrau.main([
+                    "--config", config,
+                    "dictionary", "extract",
+                    "001.jpg", "-o", "out.jsonl", "--response", "resp.json",
+                ])
+            mock_extract.assert_called_once()
+            self.assertEqual(mock_extract.call_args.args[4], "gemini-test-custom")
+            self.assertEqual(mock_extract.call_args.args[5], "high")
+
     def test_status_is_local_and_reports_pending(self):
         with tempfile.TemporaryDirectory() as directory:
             image = os.path.join(directory, "page.jpg")

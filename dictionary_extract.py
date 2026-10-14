@@ -6,7 +6,7 @@ import os
 import re
 import tempfile
 
-from vertex import generate, image_part
+from vertex import DEFAULT_MODEL, generate, image_part
 
 SCHEMA = "khusrau-dictionary-entry-v1"
 
@@ -166,14 +166,16 @@ def publish_response(response_path, output, images, dataset="farhangiadabiyat"):
 
 
 def extract(images, output, response_path, dataset="farhangiadabiyat",
-            model="gemini-3.8-flash", thinking="low"):
+            model=None, thinking=None):
+    model = model or os.environ.get("HTR_MODEL", DEFAULT_MODEL)
+    thinking = thinking or os.environ.get("HTR_THINKING", "low")
     if os.path.exists(response_path):
         raise FileExistsError(f"response artifact already exists: {response_path}")
     response = generate(
         request_parts(images), model=model, system=SYSTEM, max_tokens=32768,
         json_out=True, temperature=0, thinking=thinking)
     response["request"] = {
-        "model": model,
+        "model": response.get("model") or model,
         "thinking": thinking,
         "pages": [_page_id(path) for path in images],
     }
@@ -187,8 +189,8 @@ def main(argv=None):
     parser.add_argument("-o", "--output", required=True)
     parser.add_argument("--response", required=True)
     parser.add_argument("--dataset", default="farhangiadabiyat")
-    parser.add_argument("--model", default="gemini-3.8-flash")
-    parser.add_argument("--thinking", default="low")
+    parser.add_argument("--model", help=f"model name (default: $HTR_MODEL or {DEFAULT_MODEL})")
+    parser.add_argument("--thinking", help="thinking level (default: $HTR_THINKING or low)")
     parser.add_argument("--reuse-response", action="store_true",
                         help="validate and publish the existing response without an API call")
     args = parser.parse_args(argv)
