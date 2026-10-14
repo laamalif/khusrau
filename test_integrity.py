@@ -62,13 +62,14 @@ class IntegrityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             page = os.path.join(directory, "page.txt")
             with open(page, "w", encoding="utf-8") as f:
-                f.write("anchor one\nrecover me\nanchor two\n")
+                f.write("  ## Indented Section Heading\nanchor one\nrecover me\nanchor two\n")
             with patch("discover_sequence.process", return_value=([record], 3)), \
                     patch("discover_sequence._candidate_score",
                           return_value=(0.4, "reference two")):
                 rows = discover(FakeIndex(), page)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["candidate"]["verse"], 11)
+        self.assertEqual(rows[0]["candidate"]["hyp"], "recover me")
         self.assertEqual(rows[0]["evidence"]["offset"], 10)
         self.assertTrue(rows[0]["candidate"]["is_global_top"])
         self.assertEqual(
@@ -548,6 +549,33 @@ class IntegrityTests(unittest.TestCase):
                 metadata = json.load(f)
             self.assertEqual(metadata["categories"], [999])
             self.assertIn("retrieval", metadata["profiles"])
+
+    def test_align_write_failure_cleans_up_temporary_files(self):
+        class FakeIndex:
+            poems = {1: {"title": "Test poem"}}
+            lines = [(1, 0, set(), "line")]
+
+        record = {
+            "page": "page.txt",
+            "poem_id": 1,
+            "poem_title": "Test poem",
+            "tier": "gold",
+            "matched_lines": 1,
+            "distinct_verses": 1,
+            "cer_matched_span": 0.0,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            page = os.path.join(directory, "page.txt")
+            output = os.path.join(directory, "pairs.jsonl")
+            with open(page, "w", encoding="utf-8") as f:
+                f.write("line\n")
+            with patch.object(manufacture, "load_index", return_value=FakeIndex()), \
+                    patch.object(manufacture, "process", return_value=([record], 1)), \
+                    patch("json.dumps", side_effect=ValueError("serialization error")):
+                with self.assertRaises(ValueError):
+                    manufacture.run([999], [page], output)
+            leftovers = [n for n in os.listdir(directory) if n.startswith(".khusrau-")]
+            self.assertEqual(leftovers, [])
 
     def test_cli_requires_a_command(self):
         with redirect_stderr(StringIO()):

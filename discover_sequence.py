@@ -7,7 +7,7 @@ import os
 import tempfile
 
 from ganjoor import load_index
-from manufacture import process
+from manufacture import page_lines, process
 from urdu_norm import norm_match
 
 SCHEMA = "khusrau-sequence-discovery-v1"
@@ -51,11 +51,7 @@ def discover(ix, path, discovery_floor=0.30, min_jaccard=0.55,
     if not gold:
         return []
 
-    with open(path, encoding="utf-8") as f:
-        lines = [
-            line.strip() for line in f
-            if line.strip() and not line.startswith("##")
-        ]
+    lines = page_lines(path)
     discoveries = []
     for poem_id, record in gold.items():
         anchors = sorted(record["pairs"], key=lambda pair: pair["line"])

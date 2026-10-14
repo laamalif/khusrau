@@ -187,10 +187,15 @@ def run(cat_ids, paths, output=OUT, min_jaccard=MIN_JACCARD,
     output_dir = os.path.dirname(os.path.abspath(output))
     os.makedirs(output_dir, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=".khusrau-", suffix=".jsonl", dir=output_dir)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        for r in all_recs:
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
-    os.replace(temporary, output)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            for r in all_recs:
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        os.replace(temporary, output)
+    except BaseException:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+        raise
 
     gold = [r for r in all_recs if r["tier"] == "gold"]
     rev = [r for r in all_recs if r["tier"] == "review"]
@@ -239,10 +244,15 @@ def run(cat_ids, paths, output=OUT, min_jaccard=MIN_JACCARD,
     }
     meta_path = output + ".meta.json"
     fd, temporary = tempfile.mkstemp(prefix=".khusrau-", suffix=".json", dir=output_dir)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(metadata, f, ensure_ascii=False, indent=2)
-        f.write("\n")
-    os.replace(temporary, meta_path)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        os.replace(temporary, meta_path)
+    except BaseException:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+        raise
 
     cers = sorted(r["cer_matched_span"] for r in gold)
     print(f"\npages                {len(paths)}")
