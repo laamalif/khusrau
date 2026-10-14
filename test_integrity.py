@@ -786,6 +786,38 @@ class IntegrityTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("REKHTA_CORPUS", err.getvalue())
 
+    def test_align_verse_best_offset_empty_or_short_inputs(self):
+        from align_verse import best_offset
+        self.assertEqual(best_offset(["a", "b"], []), (None, float("inf")))
+        self.assertEqual(best_offset([], []), (None, float("inf")))
+        self.assertEqual(best_offset([], ["a"]), (None, float("inf")))
+        self.assertEqual(best_offset(["a"], ["a", "b"]), (None, float("inf")))
+
+    def test_align_verse_cli_handles_empty_or_short_inputs_cleanly(self):
+        import align_verse
+        with tempfile.TemporaryDirectory() as directory:
+            empty = os.path.join(directory, "empty.txt")
+            with open(empty, "w", encoding="utf-8") as f:
+                f.write("## only headings\n\n")
+            one = os.path.join(directory, "one.txt")
+            with open(one, "w", encoding="utf-8") as f:
+                f.write("دل نادان تجھے ہوا کیا ہے\n")
+            two = os.path.join(directory, "two.txt")
+            with open(two, "w", encoding="utf-8") as f:
+                f.write("دل نادان تجھے ہوا کیا ہے\nآخر اس درد کی دوا کیا ہے\n")
+
+            err = StringIO()
+            with redirect_stderr(err):
+                code = align_verse.main([one, empty])
+            self.assertEqual(code, 2)
+            self.assertIn("reference has no usable verse lines", err.getvalue())
+
+            err = StringIO()
+            with redirect_stderr(err):
+                code = align_verse.main([one, two])
+            self.assertEqual(code, 1)
+            self.assertIn("hypothesis has fewer lines than reference", err.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
