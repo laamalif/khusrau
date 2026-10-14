@@ -53,6 +53,11 @@ They require an external reference corpus passed via `--corpus` or `REKHTA_CORPU
 
 - Never make a Gemini call unless the user explicitly requests OCR or a model
   probe. Model access must remain guarded by `HTR_MODEL_ACCESS=1`.
+- Primary model resolution uses `HTR_MODEL` (default: `gemini-3.8-flash`) with
+  automatic fallback to `HTR_FALLBACK_MODEL` (`gemini-3.7-flash`) on HTTP 404.
+  Endpoint routing defaults to `global` (`VERTEX_LOCATION=global`) for cheaper
+  cross-region quota; regional endpoints remain opt-in. Thinking levels are
+  configured via `HTR_THINKING` (default: `low`).
 - Reuse existing `.response.json`, `.txt`, `.partial.txt`, and `.attempts/`
   artifacts. Do not retry partial or failed pages automatically; API calls have
   a real cost. Re-requesting a page requires an explicit `--force`.

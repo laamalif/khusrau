@@ -153,6 +153,14 @@ export GOOGLE_APPLICATION_CREDENTIALS="$PWD/.secrets/service_account.json"
 uv run python khusrau.py --config khusrau.toml ocr
 ```
 
+Model configuration environment variables:
+
+- `HTR_MODEL`: model name (default: `gemini-3.8-flash`). Can also be set via `[ocr].model` in `khusrau.toml`.
+- `HTR_FALLBACK_MODEL`: fallback model tried automatically if the primary model returns 404 (default: `gemini-3.7-flash`).
+- `VERTEX_LOCATION`: Vertex AI endpoint location (default: `global` for cheaper pricing and unified quota; override with e.g. `us-central1`).
+- `HTR_THINKING`: thinking level for Gemini models (`minimal`, `low`, `medium`, `high`, or `off`; default: `low`).
+- `HTR_PROJECT`: Google Cloud project ID (defaults to `project_id` in the credentials file).
+
 Model calls cost money. A page that already has text, or any recorded attempt,
 is never requested again. Duplicate paths are read once. `--force` pays for a
 new attempt explicitly.
